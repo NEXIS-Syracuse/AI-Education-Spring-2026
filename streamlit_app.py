@@ -1,7 +1,7 @@
 """
 NEXIS Education — PDF Audio Reader
 Streamlit app that converts PDF pages to narrated audio using Kokoro TTS.
-Handles text extraction, image captioning (BLIP2), OCR (EasyOCR), and TTS (Kokoro).
+Handles text extraction, image captioning (BLIP), OCR (EasyOCR), and TTS (Kokoro).
 """
 
 import streamlit as st
@@ -24,6 +24,9 @@ from transformers import (
 )
 import easyocr
 
+# **SPEED: detect GPU once at startup**
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Page config
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,6 +41,10 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 SAMPLE_RATE = 24000
 DEFAULT_VOICE = "af_heart"
+# **SPEED: cap text sent to TTS to avoid synthesising huge pages**
+MAX_TTS_CHARS = 3000
+# **SPEED: resize images to this max dimension before captioning/OCR**
+MAX_IMG_DIM = 512
 IMAGE_LABELS = [
     "graph or chart",
     "flowchart or diagram",
@@ -96,13 +103,15 @@ def load_blip():
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
     model = BlipForConditionalGeneration.from_pretrained(
         "Salesforce/blip-image-captioning-base"
-    )
+    # **SPEED: move BLIP to GPU if available for faster inference**
+    ).to(DEVICE)
     return processor, model
 
 
 @st.cache_resource(show_spinner="Loading OCR engine (EasyOCR)…")
 def load_ocr():
-    return easyocr.Reader(["en"])
+    # **SPEED: gpu=True uses CUDA if available; falls back to CPU automatically**
+    return easyocr.Reader(["en"], gpu=torch.cuda.is_available())
 
 
 @st.cache_resource(show_spinner="Loading zero-shot image classifier…")
@@ -119,14 +128,26 @@ def load_classifier():
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
 def blip_caption(pil_img: Image.Image, processor, model) -> str:
-    inputs = processor(pil_img, return_tensors="pt")
-    out = model.generate(**inputs, max_new_tokens=80)
+    # **SPEED: no_grad skips gradient tracking, cutting memory and time**
+    with torch.no_grad():
+        inputs = processor(pil_img, return_tensors="pt").to(DEVICE)
+        out = model.generate(**inputs, max_new_tokens=80)
     return processor.decode(out[0], skip_special_tokens=True)
 
 
+def resize_image(pil_img: Image.Image, max_dim: int = MAX_IMG_DIM) -> Image.Image:
+    """**SPEED: downsample large images before captioning/OCR — major time saver.**"""
+    w, h = pil_img.size
+    if max(w, h) > max_dim:
+        scale = max_dim / max(w, h)
+        pil_img = pil_img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    return pil_img
+
+
 def ocr_text(pil_img: Image.Image, reader) -> str:
-    result = reader.readtext(np.array(pil_img))
-    return " ".join([item[1] for item in result]).strip()
+    # **SPEED: detail=0 skips bounding-box computation, noticeably faster**
+    result = reader.readtext(np.array(pil_img), detail=0)
+    return " ".join(result).strip()
 
 
 def classify_image(caption: str, ocr: str, classifier) -> str:
@@ -136,6 +157,8 @@ def classify_image(caption: str, ocr: str, classifier) -> str:
 
 
 def describe_image(pil_img: Image.Image, blip_proc, blip_model, ocr_reader, classifier) -> tuple[str, str]:
+    # **SPEED: resize before any inference**
+    pil_img = resize_image(pil_img)
     caption = blip_caption(pil_img, blip_proc, blip_model)
     ocr = ocr_text(pil_img, ocr_reader)
     label = classify_image(caption, ocr, classifier)
@@ -160,6 +183,10 @@ def extract_images_from_page(fitz_page, fitz_doc) -> list[Image.Image]:
 
 
 def tts_synthesize(text: str, kokoro_pipeline, voice: str) -> np.ndarray:
+    # **SPEED: truncate at sentence boundary near MAX_TTS_CHARS to keep TTS fast**
+    if len(text) > MAX_TTS_CHARS:
+        cutoff = text.rfind(".", 0, MAX_TTS_CHARS)
+        text = text[: cutoff + 1] if cutoff != -1 else text[:MAX_TTS_CHARS]
     chunks = []
     for _, _, audio in kokoro_pipeline(text, voice=voice):
         chunks.append(audio)
@@ -167,10 +194,16 @@ def tts_synthesize(text: str, kokoro_pipeline, voice: str) -> np.ndarray:
 
 
 def audio_to_bytes(audio: np.ndarray) -> bytes:
+    # **AUDIO FIX: write to a fresh BytesIO and explicitly seek(0) before returning**
     buf = io.BytesIO()
     sf.write(buf, audio, SAMPLE_RATE, format="WAV")
     buf.seek(0)
     return buf.read()
+
+
+def play_audio(audio_bytes: bytes) -> None:
+    """**AUDIO FIX: wrap bytes in a fresh BytesIO so st.audio always gets a valid stream.**"""
+    st.audio(io.BytesIO(audio_bytes), format="audio/wav")
 
 
 def process_page(
@@ -232,7 +265,7 @@ st.markdown(
 
 # Sidebar settings
 with st.sidebar:
-    st.header("Settings")
+    st.header("⚙️ Settings")
     voice = st.selectbox(
         "TTS Voice",
         options=[
@@ -293,14 +326,15 @@ if uploaded_file:
         + ", ".join(str(p + 1) for p in pages_to_process)
     )
 
-    if st.button("Generate Audio", type="primary"):
+    if st.button("🚀 Generate Audio", type="primary"):
         # Load models
         kokoro_pipeline = load_tts()
         blip_proc, blip_model = load_blip()
         ocr_reader = load_ocr()
         classifier = load_classifier()
 
-        results = {}  # page_idx → {"narration": str, "audio_bytes": bytes}
+        # **SPEED: store results in session_state so reruns don't reprocess**
+        st.session_state["results"] = {}
 
         progress = st.progress(0.0, text="Starting…")
         status = st.empty()
@@ -324,7 +358,7 @@ if uploaded_file:
                 voice=voice,
                 status_area=status,
             )
-            results[page_idx] = {
+            st.session_state["results"][page_idx] = {
                 "narration": narration,
                 "audio_bytes": audio_to_bytes(audio),
             }
@@ -332,9 +366,10 @@ if uploaded_file:
         progress.progress(1.0, text="Done!")
         status.empty()
 
+    # Display results (outside button block so they persist across reruns)
+    if "results" in st.session_state and st.session_state["results"]:
+        results = st.session_state["results"]
         st.success(f"✅ Processed {len(results)} page(s)!")
-
-        # Display results
         st.markdown("---")
         st.header("📄 Results")
 
@@ -353,9 +388,10 @@ if uploaded_file:
                     )
                 with col2:
                     st.markdown("**Audio:**")
-                    st.audio(data["audio_bytes"], format="audio/wav")
+                    # **AUDIO FIX: use play_audio helper for reliable playback**
+                    play_audio(data["audio_bytes"])
                     st.download_button(
-                        label=f"⬇️ Download WAV",
+                        label="⬇️ Download WAV",
                         data=data["audio_bytes"],
                         file_name=f"page_{page_idx + 1:03}.wav",
                         mime="audio/wav",
