@@ -201,9 +201,166 @@ def audio_to_bytes(audio: np.ndarray) -> bytes:
     return buf.read()
 
 
-def play_audio(audio_bytes: bytes) -> None:
-    """**AUDIO FIX: wrap bytes in a fresh BytesIO so st.audio always gets a valid stream.**"""
-    st.audio(io.BytesIO(audio_bytes), format="audio/wav")
+def audio_player(audio_bytes: bytes, page_num: int) -> None:
+    """Custom audio player card with speed, seek, and volume controls."""
+    import base64
+    b64 = base64.b64encode(audio_bytes).decode()
+
+    st.components.v1.html(f"""
+    <style>
+      .nx-card {{
+        background: var(--background-color, #ffffff);
+        border: 1px solid rgba(0,0,0,0.1);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.5rem;
+        font-family: sans-serif;
+      }}
+      .nx-label {{ font-size: 13px; color: #888; margin: 0 0 10px; }}
+      .nx-controls {{ display: flex; align-items: center; gap: 10px; }}
+      .nx-btn {{
+        width: 34px; height: 34px; border-radius: 50%;
+        border: 1px solid rgba(0,0,0,0.15);
+        background: transparent; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+      }}
+      .nx-btn:hover {{ background: rgba(0,0,0,0.06); }}
+      .nx-play {{ width: 40px; height: 40px; background: rgba(0,0,0,0.05); }}
+      .nx-progress-wrap {{ flex: 1; display: flex; flex-direction: column; gap: 4px; }}
+      .nx-bar {{
+        -webkit-appearance: none; appearance: none;
+        width: 100%; height: 4px; border-radius: 2px;
+        background: rgba(0,0,0,0.12); outline: none; cursor: pointer;
+      }}
+      .nx-bar::-webkit-slider-thumb {{
+        -webkit-appearance: none; width: 14px; height: 14px;
+        border-radius: 50%; background: #333; border: none; cursor: pointer;
+      }}
+      .nx-time {{ display: flex; justify-content: space-between; font-size: 11px; color: #aaa; }}
+      .nx-vol {{ display: flex; align-items: center; gap: 6px; flex-shrink: 0; }}
+      .nx-vol-bar {{
+        -webkit-appearance: none; appearance: none;
+        width: 60px; height: 3px; border-radius: 2px;
+        background: rgba(0,0,0,0.12); outline: none; cursor: pointer;
+      }}
+      .nx-vol-bar::-webkit-slider-thumb {{
+        -webkit-appearance: none; width: 12px; height: 12px;
+        border-radius: 50%; background: #333; border: none; cursor: pointer;
+      }}
+      .nx-speed {{
+        font-size: 12px; font-weight: 500; color: #666;
+        background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.12);
+        border-radius: 6px; padding: 4px 8px; cursor: pointer;
+      }}
+    </style>
+
+    <div class="nx-card">
+      <p class="nx-label" id="lbl{page_num}">Page {page_num} — loading...</p>
+      <div class="nx-controls">
+        <button class="nx-btn" onclick="doSkip(-10)" title="Back 10s">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#444">
+            <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+          </svg>
+        </button>
+        <button class="nx-btn nx-play" id="playbtn{page_num}" onclick="togglePlay()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="#222" id="icon{page_num}">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </button>
+        <button class="nx-btn" onclick="doSkip(10)" title="Forward 10s">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#444">
+            <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>
+          </svg>
+        </button>
+        <div class="nx-progress-wrap">
+          <input type="range" class="nx-bar" id="prog{page_num}" min="0" max="100" step="0.1" value="0"
+            oninput="onScrub(this.value)">
+          <div class="nx-time">
+            <span id="cur{page_num}">0:00</span>
+            <span id="dur{page_num}">--:--</span>
+          </div>
+        </div>
+        <div class="nx-vol">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#aaa">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+          </svg>
+          <input type="range" class="nx-vol-bar" id="vol{page_num}" min="0" max="1" step="0.01" value="0.8"
+            oninput="onVol(this.value)">
+        </div>
+        <button class="nx-speed" id="spd{page_num}" onclick="cycleSpeed()">1×</button>
+      </div>
+      <audio id="aud{page_num}" style="display:none"></audio>
+    </div>
+
+    <script>
+      const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
+      let speedIdx = 1;
+      const aud = document.getElementById('aud{page_num}');
+      const prog = document.getElementById('prog{page_num}');
+      const icon = document.getElementById('icon{page_num}');
+      const lbl  = document.getElementById('lbl{page_num}');
+      const curEl = document.getElementById('cur{page_num}');
+      const durEl = document.getElementById('dur{page_num}');
+
+      // Load audio from base64
+      const b64 = "{b64}";
+      const blob = new Blob(
+        [Uint8Array.from(atob(b64), c => c.charCodeAt(0))],
+        {{type: 'audio/wav'}}
+      );
+      aud.src = URL.createObjectURL(blob);
+
+      function fmt(s) {{
+        s = Math.round(s);
+        return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+      }}
+
+      aud.addEventListener('loadedmetadata', () => {{
+        prog.max = aud.duration;
+        durEl.textContent = fmt(aud.duration);
+        lbl.textContent = 'Page {page_num} — ' + fmt(aud.duration);
+      }});
+
+      aud.addEventListener('timeupdate', () => {{
+        prog.value = aud.currentTime;
+        curEl.textContent = fmt(aud.currentTime);
+      }});
+
+      aud.addEventListener('ended', () => {{
+        icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        prog.value = 0;
+        curEl.textContent = '0:00';
+      }});
+
+      function togglePlay() {{
+        if (aud.paused) {{
+          aud.play();
+          icon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+        }} else {{
+          aud.pause();
+          icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        }}
+      }}
+
+      function doSkip(secs) {{
+        aud.currentTime = Math.min(Math.max(0, aud.currentTime + secs), aud.duration);
+      }}
+
+      function onScrub(v) {{
+        aud.currentTime = v;
+        curEl.textContent = fmt(v);
+      }}
+
+      function onVol(v) {{ aud.volume = v; }}
+
+      function cycleSpeed() {{
+        speedIdx = (speedIdx + 1) % SPEEDS.length;
+        aud.playbackRate = SPEEDS[speedIdx];
+        document.getElementById('spd{page_num}').textContent = SPEEDS[speedIdx] + '×';
+      }}
+    </script>
+    """, height=110)
 
 
 def process_page(
