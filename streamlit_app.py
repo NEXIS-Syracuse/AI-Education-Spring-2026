@@ -232,7 +232,7 @@ st.markdown(
 
 # Sidebar settings
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("Settings")
     voice = st.selectbox(
         "TTS Voice",
         options=[
