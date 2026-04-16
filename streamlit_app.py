@@ -293,7 +293,7 @@ if uploaded_file:
         + ", ".join(str(p + 1) for p in pages_to_process)
     )
 
-    if st.button("🚀 Generate Audio", type="primary"):
+    if st.button("Generate Audio", type="primary"):
         # Load models
         kokoro_pipeline = load_tts()
         blip_proc, blip_model = load_blip()
