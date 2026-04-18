@@ -201,94 +201,91 @@ def audio_to_bytes(audio: np.ndarray) -> bytes:
     return buf.read()
 
 
-def audio_player(audio_bytes: bytes, page_num: int) -> None:
-    """Custom audio player card with speed, seek, and volume controls."""
+def mini_audio_player(audio_bytes: bytes, page_num: int) -> None:
+    """Compact mini audio player with play/pause, seek, speed, and volume."""
     import base64
     b64 = base64.b64encode(audio_bytes).decode()
 
     st.components.v1.html(f"""
     <style>
-      .nx-card {{
-        background: var(--background-color, #ffffff);
-        border: 1px solid rgba(0,0,0,0.1);
+      * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+      body {{ background: transparent; }}
+      .mp {{
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
         border-radius: 12px;
-        padding: 1rem 1.25rem;
-        margin-bottom: 0.5rem;
-        font-family: sans-serif;
+        padding: 10px 14px;
+        color: #e0e0e0;
       }}
-      .nx-label {{ font-size: 13px; color: #888; margin: 0 0 10px; }}
-      .nx-controls {{ display: flex; align-items: center; gap: 10px; }}
-      .nx-btn {{
-        width: 34px; height: 34px; border-radius: 50%;
-        border: 1px solid rgba(0,0,0,0.15);
-        background: transparent; cursor: pointer;
+      .mp-top {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }}
+      .mp-lbl {{ font-size: 11px; color: #8899aa; flex: 1; }}
+      .mp-spd {{
+        font-size: 10px; font-weight: 600; color: #64ffda;
+        background: rgba(100,255,218,0.1); border: 1px solid rgba(100,255,218,0.25);
+        border-radius: 4px; padding: 2px 6px; cursor: pointer;
+        transition: background 0.2s;
+      }}
+      .mp-spd:hover {{ background: rgba(100,255,218,0.2); }}
+      .mp-row {{ display: flex; align-items: center; gap: 8px; }}
+      .mp-btn {{
+        width: 32px; height: 32px; border-radius: 50%;
+        border: none; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
+        background: rgba(100,255,218,0.15); transition: background 0.2s;
         flex-shrink: 0;
       }}
-      .nx-btn:hover {{ background: rgba(0,0,0,0.06); }}
-      .nx-play {{ width: 40px; height: 40px; background: rgba(0,0,0,0.05); }}
-      .nx-progress-wrap {{ flex: 1; display: flex; flex-direction: column; gap: 4px; }}
-      .nx-bar {{
+      .mp-btn:hover {{ background: rgba(100,255,218,0.3); }}
+      .mp-btn svg {{ fill: #64ffda; }}
+      .mp-mid {{ flex: 1; display: flex; flex-direction: column; gap: 2px; }}
+      .mp-bar {{
         -webkit-appearance: none; appearance: none;
         width: 100%; height: 4px; border-radius: 2px;
-        background: rgba(0,0,0,0.12); outline: none; cursor: pointer;
+        background: rgba(255,255,255,0.12); outline: none; cursor: pointer;
       }}
-      .nx-bar::-webkit-slider-thumb {{
-        -webkit-appearance: none; width: 14px; height: 14px;
-        border-radius: 50%; background: #333; border: none; cursor: pointer;
-      }}
-      .nx-time {{ display: flex; justify-content: space-between; font-size: 11px; color: #aaa; }}
-      .nx-vol {{ display: flex; align-items: center; gap: 6px; flex-shrink: 0; }}
-      .nx-vol-bar {{
-        -webkit-appearance: none; appearance: none;
-        width: 60px; height: 3px; border-radius: 2px;
-        background: rgba(0,0,0,0.12); outline: none; cursor: pointer;
-      }}
-      .nx-vol-bar::-webkit-slider-thumb {{
+      .mp-bar::-webkit-slider-thumb {{
         -webkit-appearance: none; width: 12px; height: 12px;
-        border-radius: 50%; background: #333; border: none; cursor: pointer;
+        border-radius: 50%; background: #64ffda; border: none; cursor: pointer;
       }}
-      .nx-speed {{
-        font-size: 12px; font-weight: 500; color: #666;
-        background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.12);
-        border-radius: 6px; padding: 4px 8px; cursor: pointer;
+      .mp-times {{ display: flex; justify-content: space-between; font-size: 10px; color: #667788; }}
+      .mp-vol {{ display: flex; align-items: center; gap: 4px; flex-shrink: 0; }}
+      .mp-vol svg {{ fill: #667788; }}
+      .mp-vbar {{
+        -webkit-appearance: none; appearance: none;
+        width: 40px; height: 3px; border-radius: 2px;
+        background: rgba(255,255,255,0.12); outline: none; cursor: pointer;
+      }}
+      .mp-vbar::-webkit-slider-thumb {{
+        -webkit-appearance: none; width: 10px; height: 10px;
+        border-radius: 50%; background: #667788; border: none; cursor: pointer;
       }}
     </style>
 
-    <div class="nx-card">
-      <p class="nx-label" id="lbl{page_num}">Page {page_num} — loading...</p>
-      <div class="nx-controls">
-        <button class="nx-btn" onclick="doSkip(-10)" title="Back 10s">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="#444">
-            <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-          </svg>
-        </button>
-        <button class="nx-btn nx-play" id="playbtn{page_num}" onclick="togglePlay()">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="#222" id="icon{page_num}">
+    <div class="mp">
+      <div class="mp-top">
+        <span class="mp-lbl" id="lbl{page_num}">Page {page_num}</span>
+        <button class="mp-spd" id="spd{page_num}" onclick="cycleSpeed()">1×</button>
+      </div>
+      <div class="mp-row">
+        <button class="mp-btn" id="playbtn{page_num}" onclick="togglePlay()">
+          <svg width="14" height="14" viewBox="0 0 24 24" id="icon{page_num}">
             <path d="M8 5v14l11-7z"/>
           </svg>
         </button>
-        <button class="nx-btn" onclick="doSkip(10)" title="Forward 10s">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="#444">
-            <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>
-          </svg>
-        </button>
-        <div class="nx-progress-wrap">
-          <input type="range" class="nx-bar" id="prog{page_num}" min="0" max="100" step="0.1" value="0"
+        <div class="mp-mid">
+          <input type="range" class="mp-bar" id="prog{page_num}" min="0" max="100" step="0.1" value="0"
             oninput="onScrub(this.value)">
-          <div class="nx-time">
+          <div class="mp-times">
             <span id="cur{page_num}">0:00</span>
             <span id="dur{page_num}">--:--</span>
           </div>
         </div>
-        <div class="nx-vol">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="#aaa">
+        <div class="mp-vol">
+          <svg width="12" height="12" viewBox="0 0 24 24">
             <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
           </svg>
-          <input type="range" class="nx-vol-bar" id="vol{page_num}" min="0" max="1" step="0.01" value="0.8"
+          <input type="range" class="mp-vbar" id="vol{page_num}" min="0" max="1" step="0.01" value="0.8"
             oninput="onVol(this.value)">
         </div>
-        <button class="nx-speed" id="spd{page_num}" onclick="cycleSpeed()">1×</button>
       </div>
       <audio id="aud{page_num}" style="display:none"></audio>
     </div>
@@ -303,7 +300,6 @@ def audio_player(audio_bytes: bytes, page_num: int) -> None:
       const curEl = document.getElementById('cur{page_num}');
       const durEl = document.getElementById('dur{page_num}');
 
-      // Load audio from base64
       const b64 = "{b64}";
       const blob = new Blob(
         [Uint8Array.from(atob(b64), c => c.charCodeAt(0))],
@@ -360,7 +356,14 @@ def audio_player(audio_bytes: bytes, page_num: int) -> None:
         document.getElementById('spd{page_num}').textContent = SPEEDS[speedIdx] + '×';
       }}
     </script>
-    """, height=160)
+    """, height=90)
+
+
+def _log_step(container, log_lines: list[str], msg: str, elapsed: float | None = None):
+    """Append a timestamped line to the progress log and re-render it."""
+    suffix = f"  `({elapsed:.1f}s)`" if elapsed is not None else " ⏳"
+    log_lines.append(f"- {msg}{suffix}")
+    container.markdown("\n".join(log_lines))
 
 
 def process_page(
@@ -373,25 +376,36 @@ def process_page(
     classifier,
     kokoro_pipeline,
     voice: str,
-    status_area,
+    log_container,
+    log_lines: list[str],
 ) -> tuple[str, np.ndarray]:
     """Process a single PDF page → (narration text, audio array)."""
 
-    # 1. Text
+    # 1. Text extraction
+    t0 = time.time()
+    _log_step(log_container, log_lines, f"📝 **Page {page_idx + 1}** — extracting text")
     page_text = pdf_text.pages[page_idx].extract_text() or ""
     page_text = re.sub(r"\n+", " ", page_text).strip()
+    _log_step(log_container, log_lines,
+              f"  Text: {len(page_text)} chars", time.time() - t0)
 
     # 2. Images
+    t0 = time.time()
     fitz_page = pdf_fitz[page_idx]
     page_images = extract_images_from_page(fitz_page, pdf_fitz)
-    status_area.write(f"  Found **{len(page_images)}** image(s) on this page.")
+    _log_step(log_container, log_lines,
+              f"  Found **{len(page_images)}** image(s)", time.time() - t0)
 
     image_narrations = []
     for img_i, pil in enumerate(page_images):
-        status_area.write(f"  → Describing image {img_i + 1}…")
+        t0 = time.time()
+        _log_step(log_container, log_lines,
+                  f"  🖼️ Describing image {img_i + 1}/{len(page_images)}")
         label, desc = describe_image(pil, blip_proc, blip_model, ocr_reader, classifier)
         spoken = f"Image {img_i + 1}, {label}. {desc}"
         image_narrations.append(spoken)
+        _log_step(log_container, log_lines,
+                  f"  Image {img_i + 1} → *{label}*", time.time() - t0)
 
     # 3. Combine
     parts = []
@@ -400,13 +414,20 @@ def process_page(
     parts.extend(image_narrations)
 
     if not parts:
+        _log_step(log_container, log_lines,
+                  f"  ⚠️ Page {page_idx + 1}: no extractable content", 0.0)
         return "(no content)", np.zeros(0, dtype=np.float32)
 
     full_narration = "  ".join(parts)
 
     # 4. TTS
-    status_area.write("  Synthesising audio…")
+    t0 = time.time()
+    _log_step(log_container, log_lines,
+              f"  🔊 Synthesising audio ({len(full_narration)} chars)")
     audio = tts_synthesize(full_narration, kokoro_pipeline, voice)
+    _log_step(log_container, log_lines,
+              f"  ✅ Audio ready — {len(audio)/SAMPLE_RATE:.1f}s of audio",
+              time.time() - t0)
 
     return full_narration, audio
 
@@ -484,24 +505,50 @@ if uploaded_file:
     )
 
     if st.button("🚀 Generate Audio", type="primary"):
-        # Load models
-        kokoro_pipeline = load_tts()
-        blip_proc, blip_model = load_blip()
-        ocr_reader = load_ocr()
-        classifier = load_classifier()
+        overall_start = time.time()
 
-        # **SPEED: store results in session_state so reruns don't reprocess**
+        # ── Model loading with visible progress ──────────────────────────
+        progress = st.progress(0.0, text="Step 1/5 — Loading TTS model (Kokoro)…")
+        log_container = st.container()
+        log_lines: list[str] = []
+        _log_step(log_container, log_lines, "🔧 **Loading models** (first run downloads & caches them)")
+
+        model_steps = [
+            ("🗣️ TTS model (Kokoro)",       load_tts,        0.05),
+            ("🖼️ Image captioning (BLIP)",   load_blip,       0.25),
+            ("🔍 OCR engine (EasyOCR)",      load_ocr,        0.45),
+            ("🏷️ Classifier (BART)",         load_classifier, 0.65),
+        ]
+        models = {}
+        for label, loader, pct in model_steps:
+            t0 = time.time()
+            _log_step(log_container, log_lines, f"{label} — loading")
+            progress.progress(pct, text=f"Loading {label}…")
+            result = loader()
+            _log_step(log_container, log_lines, f"{label} — ready", time.time() - t0)
+            models[label] = result
+
+        kokoro_pipeline = models["🗣️ TTS model (Kokoro)"]
+        blip_proc, blip_model = models["🖼️ Image captioning (BLIP)"]
+        ocr_reader = models["🔍 OCR engine (EasyOCR)"]
+        classifier = models["🏷️ Classifier (BART)"]
+
+        _log_step(log_container, log_lines,
+                  "✅ **All models loaded**", time.time() - overall_start)
+        _log_step(log_container, log_lines, "---")
+        _log_step(log_container, log_lines, "📄 **Processing pages**")
+
+        # ── Page processing ──────────────────────────────────────────────
         st.session_state["results"] = {}
-
-        progress = st.progress(0.0, text="Starting…")
-        status = st.empty()
+        n = len(pages_to_process)
 
         for i, page_idx in enumerate(pages_to_process):
+            page_start = time.time()
+            frac = 0.7 + 0.3 * (i / n)
             progress.progress(
-                i / len(pages_to_process),
-                text=f"Processing page {page_idx + 1} / {num_pages}…",
+                frac,
+                text=f"Processing page {page_idx + 1} ({i + 1}/{n})…",
             )
-            status.write(f"### Page {page_idx + 1}")
 
             narration, audio = process_page(
                 page_idx=page_idx,
@@ -513,15 +560,18 @@ if uploaded_file:
                 classifier=classifier,
                 kokoro_pipeline=kokoro_pipeline,
                 voice=voice,
-                status_area=status,
+                log_container=log_container,
+                log_lines=log_lines,
             )
             st.session_state["results"][page_idx] = {
                 "narration": narration,
                 "audio_bytes": audio_to_bytes(audio),
             }
 
-        progress.progress(1.0, text="Done!")
-        status.empty()
+        total = time.time() - overall_start
+        progress.progress(1.0, text=f"Done! Total time: {total:.1f}s")
+        _log_step(log_container, log_lines,
+                  f"🎉 **All done** — {n} page(s) in {total:.1f}s", total)
 
     # Display results (outside button block so they persist across reruns)
     if "results" in st.session_state and st.session_state["results"]:
@@ -545,11 +595,11 @@ if uploaded_file:
                     )
                 with col2:
                     st.markdown("**Audio:**")
-                    # **AUDIO FIX: guard against empty WAV and use st.audio for reliability**
+                    # Use mini player if audio has content, otherwise show info
                     if len(data["audio_bytes"]) <= 44:
                         st.info("No audio — page had no extractable content.")
                     else:
-                        st.audio(data["audio_bytes"], format="audio/wav")
+                        mini_audio_player(data["audio_bytes"], page_idx + 1)
                     st.download_button(
                         label="⬇️ Download WAV",
                         data=data["audio_bytes"],
