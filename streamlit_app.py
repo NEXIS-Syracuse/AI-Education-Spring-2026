@@ -17,12 +17,14 @@ import fitz  # PyMuPDF
 from pypdf import PdfReader
 from PIL import Image
 from kokoro import KPipeline
-from transformers import (
-    BlipProcessor,
-    BlipForConditionalGeneration,
-    # pipeline as hf_pipeline,  # COMMENTED OUT — only BART used this (~1.6GB RAM)
-)
-# import easyocr  # COMMENTED OUT at top-level — lazy-loaded only when images are found
+# COMMENTED OUT at top-level — lazy-loaded inside load_blip() to avoid
+# massive __path__ warning spam and ~100MB RAM overhead at startup.
+# from transformers import (
+#     BlipProcessor,
+#     BlipForConditionalGeneration,
+#     # pipeline as hf_pipeline,  # only BART used this (~1.6GB RAM)
+# )
+# import easyocr  # lazy-loaded inside load_ocr()
 
 # **SPEED: detect GPU once at startup**
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -104,6 +106,7 @@ def load_tts():
 # This keeps RAM at ~700MB for text-only PDFs (Kokoro + PyTorch only).
 @st.cache_resource(show_spinner="Loading image captioning model (BLIP)…")
 def load_blip():
+    from transformers import BlipProcessor, BlipForConditionalGeneration  # lazy import
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
     model = BlipForConditionalGeneration.from_pretrained(
         "Salesforce/blip-image-captioning-base"
