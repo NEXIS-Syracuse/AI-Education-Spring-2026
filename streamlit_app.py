@@ -20,9 +20,9 @@ from kokoro import KPipeline
 from transformers import (
     BlipProcessor,
     BlipForConditionalGeneration,
-    pipeline as hf_pipeline,
+    # pipeline as hf_pipeline,  # COMMENTED OUT — only BART used this (~1.6GB RAM)
 )
-import easyocr
+# import easyocr  # COMMENTED OUT at top-level — lazy-loaded only when images are found
 
 # **SPEED: detect GPU once at startup**
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -45,50 +45,52 @@ DEFAULT_VOICE = "af_heart"
 MAX_TTS_CHARS = 3000
 # **SPEED: resize images to this max dimension before captioning/OCR**
 MAX_IMG_DIM = 512
-IMAGE_LABELS = [
-    "graph or chart",
-    "flowchart or diagram",
-    "infographic",
-    "user interface screenshot",
-    "photograph or illustration",
-    "table",
-    "equation or formula",
-]
-ROUTE_PROMPTS = {
-    "graph or chart": (
-        "You are narrating a graph or chart for a blind listener. "
-        "Describe the trends, axes, and key data points clearly.\n"
-        "Caption: {caption}\nText in image: {ocr}\nDescription:"
-    ),
-    "flowchart or diagram": (
-        "You are narrating a flowchart or diagram for a blind listener. "
-        "Walk through the steps or components in order.\n"
-        "Caption: {caption}\nText in image: {ocr}\nDescription:"
-    ),
-    "infographic": (
-        "You are narrating an infographic for a blind listener. "
-        "Summarise the key facts and their relationships.\n"
-        "Caption: {caption}\nText in image: {ocr}\nDescription:"
-    ),
-    "user interface screenshot": (
-        "You are narrating a UI screenshot for a blind listener. "
-        "Describe the layout, buttons, and content visible.\n"
-        "Caption: {caption}\nText in image: {ocr}\nDescription:"
-    ),
-    "table": (
-        "You are narrating a table for a blind listener. "
-        "Read out the column headers and the most important rows.\n"
-        "Caption: {caption}\nText in image: {ocr}\nDescription:"
-    ),
-    "equation or formula": (
-        "Read this equation aloud clearly.\n"
-        "Caption: {caption}\nText in image: {ocr}\nEquation spoken:"
-    ),
-}
-DEFAULT_PROMPT = (
-    "Describe this image for a blind listener.\n"
-    "Caption: {caption}\nText in image: {ocr}\nDescription:"
-)
+# ── COMMENTED OUT: BART classifier labels & prompts (saves ~1.6GB RAM) ──────
+# To re-enable, uncomment these and the load_classifier / classify_image functions.
+# IMAGE_LABELS = [
+#     "graph or chart",
+#     "flowchart or diagram",
+#     "infographic",
+#     "user interface screenshot",
+#     "photograph or illustration",
+#     "table",
+#     "equation or formula",
+# ]
+# ROUTE_PROMPTS = {
+#     "graph or chart": (
+#         "You are narrating a graph or chart for a blind listener. "
+#         "Describe the trends, axes, and key data points clearly.\n"
+#         "Caption: {caption}\nText in image: {ocr}\nDescription:"
+#     ),
+#     "flowchart or diagram": (
+#         "You are narrating a flowchart or diagram for a blind listener. "
+#         "Walk through the steps or components in order.\n"
+#         "Caption: {caption}\nText in image: {ocr}\nDescription:"
+#     ),
+#     "infographic": (
+#         "You are narrating an infographic for a blind listener. "
+#         "Summarise the key facts and their relationships.\n"
+#         "Caption: {caption}\nText in image: {ocr}\nDescription:"
+#     ),
+#     "user interface screenshot": (
+#         "You are narrating a UI screenshot for a blind listener. "
+#         "Describe the layout, buttons, and content visible.\n"
+#         "Caption: {caption}\nText in image: {ocr}\nDescription:"
+#     ),
+#     "table": (
+#         "You are narrating a table for a blind listener. "
+#         "Read out the column headers and the most important rows.\n"
+#         "Caption: {caption}\nText in image: {ocr}\nDescription:"
+#     ),
+#     "equation or formula": (
+#         "Read this equation aloud clearly.\n"
+#         "Caption: {caption}\nText in image: {ocr}\nEquation spoken:"
+#     ),
+# }
+# DEFAULT_PROMPT = (
+#     "Describe this image for a blind listener.\n"
+#     "Caption: {caption}\nText in image: {ocr}\nDescription:"
+# )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Model loading (cached so they load once per session)
@@ -98,6 +100,8 @@ def load_tts():
     return KPipeline(lang_code="a")
 
 
+# ── BLIP and EasyOCR: lazy-loaded only when images are found on a page ──────
+# This keeps RAM at ~700MB for text-only PDFs (Kokoro + PyTorch only).
 @st.cache_resource(show_spinner="Loading image captioning model (BLIP)…")
 def load_blip():
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -110,18 +114,20 @@ def load_blip():
 
 @st.cache_resource(show_spinner="Loading OCR engine (EasyOCR)…")
 def load_ocr():
+    import easyocr  # lazy import to avoid loading at startup
     # **SPEED: gpu=True uses CUDA if available; falls back to CPU automatically**
     return easyocr.Reader(["en"], gpu=torch.cuda.is_available())
 
 
-@st.cache_resource(show_spinner="Loading zero-shot image classifier…")
-def load_classifier():
-    device = 0 if torch.cuda.is_available() else -1
-    return hf_pipeline(
-        "zero-shot-classification",
-        model="facebook/bart-large-mnli",
-        device=device,
-    )
+# ── COMMENTED OUT: BART zero-shot classifier (~1.6GB RAM — too heavy for Cloud) ──
+# @st.cache_resource(show_spinner="Loading zero-shot image classifier…")
+# def load_classifier():
+#     device = 0 if torch.cuda.is_available() else -1
+#     return hf_pipeline(
+#         "zero-shot-classification",
+#         model="facebook/bart-large-mnli",
+#         device=device,
+#     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,25 +156,28 @@ def ocr_text(pil_img: Image.Image, reader) -> str:
     return " ".join(result).strip()
 
 
-def classify_image(caption: str, ocr: str, classifier) -> str:
-    probe = f"{caption}. {ocr[:300]}"
-    result = classifier(probe, IMAGE_LABELS, multi_label=False)
-    return result["labels"][0]
+# ── COMMENTED OUT: classify_image (requires BART — too heavy for Cloud) ──────
+# def classify_image(caption: str, ocr: str, classifier) -> str:
+#     probe = f"{caption}. {ocr[:300]}"
+#     result = classifier(probe, IMAGE_LABELS, multi_label=False)
+#     return result["labels"][0]
 
 
-def describe_image(pil_img: Image.Image, blip_proc, blip_model, ocr_reader, classifier) -> tuple[str, str]:
+def describe_image(pil_img: Image.Image, blip_proc, blip_model, ocr_reader) -> tuple[str, str]:
+    """Describe an image using BLIP captioning + OCR (no BART classification)."""
     # **SPEED: resize before any inference**
     pil_img = resize_image(pil_img)
     caption = blip_caption(pil_img, blip_proc, blip_model)
     ocr = ocr_text(pil_img, ocr_reader)
-    label = classify_image(caption, ocr, classifier)
-    template = ROUTE_PROMPTS.get(label, DEFAULT_PROMPT)
-    # For Streamlit we use the caption + OCR directly as the narration
-    # (avoids loading a heavy T5 model; BLIP caption is already descriptive)
-    description = f"{label}. {caption}."
+    # ── COMMENTED OUT: BART classification ──
+    # label = classify_image(caption, ocr, classifier)
+    # template = ROUTE_PROMPTS.get(label, DEFAULT_PROMPT)
+    # description = f"{label}. {caption}."
+    # Without BART, we just use the BLIP caption directly:
+    description = caption
     if ocr:
-        description += f" Text in image: {ocr[:400]}"
-    return label, description
+        description += f". Text in image: {ocr[:400]}"
+    return "image", description
 
 
 def extract_images_from_page(fitz_page, fitz_doc) -> list[Image.Image]:
@@ -370,10 +379,6 @@ def process_page(
     page_idx: int,
     pdf_text: PdfReader,
     pdf_fitz,
-    blip_proc,
-    blip_model,
-    ocr_reader,
-    classifier,
     kokoro_pipeline,
     voice: str,
     log_container,
@@ -389,7 +394,7 @@ def process_page(
     _log_step(log_container, log_lines,
               f"  Text: {len(page_text)} chars", time.time() - t0)
 
-    # 2. Images
+    # 2. Images — BLIP & EasyOCR are lazy-loaded ONLY if images exist
     t0 = time.time()
     fitz_page = pdf_fitz[page_idx]
     page_images = extract_images_from_page(fitz_page, pdf_fitz)
@@ -397,15 +402,24 @@ def process_page(
               f"  Found **{len(page_images)}** image(s)", time.time() - t0)
 
     image_narrations = []
-    for img_i, pil in enumerate(page_images):
+    if page_images:
+        # Lazy-load BLIP and EasyOCR only when we actually need them
+        _log_step(log_container, log_lines, "  ⬇️ Loading image models (BLIP + OCR)…")
         t0 = time.time()
+        blip_proc, blip_model = load_blip()
+        ocr_reader = load_ocr()
         _log_step(log_container, log_lines,
-                  f"  🖼️ Describing image {img_i + 1}/{len(page_images)}")
-        label, desc = describe_image(pil, blip_proc, blip_model, ocr_reader, classifier)
-        spoken = f"Image {img_i + 1}, {label}. {desc}"
-        image_narrations.append(spoken)
-        _log_step(log_container, log_lines,
-                  f"  Image {img_i + 1} → *{label}*", time.time() - t0)
+                  "  Image models ready", time.time() - t0)
+
+        for img_i, pil in enumerate(page_images):
+            t0 = time.time()
+            _log_step(log_container, log_lines,
+                      f"  🖼️ Describing image {img_i + 1}/{len(page_images)}")
+            label, desc = describe_image(pil, blip_proc, blip_model, ocr_reader)
+            spoken = f"Image {img_i + 1}: {desc}"
+            image_narrations.append(spoken)
+            _log_step(log_container, log_lines,
+                      f"  Image {img_i + 1} described", time.time() - t0)
 
     # 3. Combine
     parts = []
@@ -507,34 +521,27 @@ if uploaded_file:
     if st.button("🚀 Generate Audio", type="primary"):
         overall_start = time.time()
 
-        # ── Model loading with visible progress ──────────────────────────
-        progress = st.progress(0.0, text="Step 1/5 — Loading TTS model (Kokoro)…")
+        # ── Model loading ─────────────────────────────────────────────────
+        # Only Kokoro TTS loads eagerly (~400MB).
+        # BLIP + EasyOCR lazy-load inside process_page IF images are found.
+        # BART classifier is commented out entirely (saves ~1.6GB).
+        progress = st.progress(0.0, text="Loading TTS model (Kokoro)…")
         log_container = st.container()
         log_lines: list[str] = []
-        _log_step(log_container, log_lines, "🔧 **Loading models** (first run downloads & caches them)")
+        _log_step(log_container, log_lines, "🔧 **Loading TTS model** (first run downloads & caches it)")
 
-        model_steps = [
-            ("🗣️ TTS model (Kokoro)",       load_tts,        0.05),
-            ("🖼️ Image captioning (BLIP)",   load_blip,       0.25),
-            ("🔍 OCR engine (EasyOCR)",      load_ocr,        0.45),
-            ("🏷️ Classifier (BART)",         load_classifier, 0.65),
-        ]
-        models = {}
-        for label, loader, pct in model_steps:
-            t0 = time.time()
-            _log_step(log_container, log_lines, f"{label} — loading")
-            progress.progress(pct, text=f"Loading {label}…")
-            result = loader()
-            _log_step(log_container, log_lines, f"{label} — ready", time.time() - t0)
-            models[label] = result
-
-        kokoro_pipeline = models["🗣️ TTS model (Kokoro)"]
-        blip_proc, blip_model = models["🖼️ Image captioning (BLIP)"]
-        ocr_reader = models["🔍 OCR engine (EasyOCR)"]
-        classifier = models["🏷️ Classifier (BART)"]
-
+        t0 = time.time()
+        kokoro_pipeline = load_tts()
         _log_step(log_container, log_lines,
-                  "✅ **All models loaded**", time.time() - overall_start)
+                  "🗣️ Kokoro TTS — ready", time.time() - t0)
+
+        # ── COMMENTED OUT: eager loading of BLIP, EasyOCR, BART ──────────
+        # These are now lazy-loaded in process_page only when images exist.
+        # blip_proc, blip_model = load_blip()
+        # ocr_reader = load_ocr()
+        # classifier = load_classifier()  # BART — removed entirely
+
+        progress.progress(0.3, text="TTS model loaded. Processing pages…")
         _log_step(log_container, log_lines, "---")
         _log_step(log_container, log_lines, "📄 **Processing pages**")
 
@@ -544,7 +551,7 @@ if uploaded_file:
 
         for i, page_idx in enumerate(pages_to_process):
             page_start = time.time()
-            frac = 0.7 + 0.3 * (i / n)
+            frac = 0.3 + 0.7 * (i / n)
             progress.progress(
                 frac,
                 text=f"Processing page {page_idx + 1} ({i + 1}/{n})…",
@@ -554,10 +561,6 @@ if uploaded_file:
                 page_idx=page_idx,
                 pdf_text=pdf_text,
                 pdf_fitz=pdf_fitz,
-                blip_proc=blip_proc,
-                blip_model=blip_model,
-                ocr_reader=ocr_reader,
-                classifier=classifier,
                 kokoro_pipeline=kokoro_pipeline,
                 voice=voice,
                 log_container=log_container,
@@ -620,9 +623,8 @@ else:
         """
         ### What this app does
         1. **Extracts text** from each PDF page
-        2. **Detects and describes images** using BLIP captioning + EasyOCR
-        3. **Classifies images** (chart, diagram, table, etc.) for appropriate narration
-        4. **Synthesises audio** with Kokoro TTS
-        5. **Plays and exports** per-page WAV files
+        2. **Detects and describes images** using BLIP captioning + EasyOCR (loaded only when needed)
+        3. **Synthesises audio** with Kokoro TTS
+        4. **Plays and exports** per-page WAV files
         """
     )
