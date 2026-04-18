@@ -360,7 +360,7 @@ def audio_player(audio_bytes: bytes, page_num: int) -> None:
         document.getElementById('spd{page_num}').textContent = SPEEDS[speedIdx] + '×';
       }}
     </script>
-    """, height=110)
+    """, height=160)
 
 
 def process_page(
@@ -545,8 +545,11 @@ if uploaded_file:
                     )
                 with col2:
                     st.markdown("**Audio:**")
-                    # **AUDIO FIX: use play_audio helper for reliable playback**
-                    play_audio(data["audio_bytes"])
+                    # **AUDIO FIX: guard against empty WAV and use st.audio for reliability**
+                    if len(data["audio_bytes"]) <= 44:
+                        st.info("No audio — page had no extractable content.")
+                    else:
+                        st.audio(data["audio_bytes"], format="audio/wav")
                     st.download_button(
                         label="⬇️ Download WAV",
                         data=data["audio_bytes"],
@@ -555,8 +558,11 @@ if uploaded_file:
                         key=f"dl_{page_idx}",
                     )
 
-        # Clean up temp file
-        os.unlink(tmp_path)
+        # Clean up temp file (may already be gone on rerun)
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
 
 else:
     st.info("👆 Upload a PDF to get started.")
